@@ -51,12 +51,21 @@ var createCmd = &cobra.Command{
 		basePackage, _ := reader.ReadString('\n')
 		basePackage = strings.Replace(basePackage, string('\n'), "", 1)
 
+		fmt.Print("Application Name (Artifact ID): ")
+		appName, _ := reader.ReadString('\n')
+		appName = strings.Replace(appName, string('\n'), "", 1)
+
 		createDir(args[0], basePackage)
 		downloadZip(args[0])
 		dest := strings.Replace(args[0], ".", "", 1)
 		fmt.Println("Dest:" + dest)
-		_, err := unzip(args[0] + "/test.zip", dest, basePackage, args[0])
+		_, err := unzip(args[0] + "/test.zip", dest, basePackage, appName)
 		fmt.Println(err)
+
+		os.Remove(args[0] + "/test.zip")
+
+		os.Rename(args[0] + "/src/main/resources/.env.example", args[0]+ "/src/main/resources/.env")
+
 
 		data := foo {
 			Package: basePackage,
