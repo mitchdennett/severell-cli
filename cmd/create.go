@@ -9,8 +9,10 @@ import (
 	"github.com/spf13/cobra"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -32,6 +34,8 @@ type flag struct {
 type foo struct {
 	AppName string
 	Package string
+	BasePackage string
+	GroupId string
 	Commands []command
 }
 
@@ -68,14 +72,30 @@ var createCmd = &cobra.Command{
 
 
 		data := foo {
-			Package: basePackage,
+			Package: basePackage + "." + appName,
 		}
 
 		file, _ := json.MarshalIndent(data, "", " ")
 
-		_ = ioutil.WriteFile("severell.json", file, 0644)
+		_ = ioutil.WriteFile(args[0] + "/severell.json", file, 0644)
+
+		compile(args[0])
+		loadCommands(&args[0], &data.Package)
 
 	},
+}
+
+func compile(dir string) {
+	cmdCon := exec.Command("mvn","-q", "clean", "compile")
+	cmdCon.Dir = dir
+
+	cmdCon.Stdout = os.Stdout
+	cmdCon.Stderr = os.Stderr
+
+	err := cmdCon.Run()
+	if err != nil {
+		log.Fatalf("cmd.Run() failed with %s\n", err)
+	}
 }
 
 func createDir(dir string, basePackage string) {
@@ -125,6 +145,10 @@ func unzip(src string, dest string, basePackage string, name string) ([]string, 
 
 		// Store filename/path for returning and using later on
 
+		groupId := basePackage
+		packageName := strings.ReplaceAll(basePackage, ".", "/") + "/" + name
+		packageNameWithDots := basePackage + "." + name
+
 		fpath := filepath.Join(dest, strings.TrimPrefix(f.Name, "severell-framework-master/"))
 		fmt.Println(fpath)
 		// Check for ZipSlip. More Info: http://bit.ly/2MsjAWE
@@ -137,7 +161,7 @@ func unzip(src string, dest string, basePackage string, name string) ([]string, 
 		}
 
 		if strings.HasPrefix(fpath, replaceDest + "src/main/java") ||  strings.HasPrefix(fpath, replaceDest + "src/test/java") {
-			fpath = strings.Replace(fpath, replaceDest + "src/main/java", replaceDest + "src/main/java/" + strings.ReplaceAll(basePackage, ".", "/"), 1)
+			fpath = strings.Replace(fpath, replaceDest + "src/main/java", replaceDest + "src/main/java/" + packageName , 1)
 		}
 
 		filenames = append(filenames, fpath)
@@ -171,7 +195,7 @@ func unzip(src string, dest string, basePackage string, name string) ([]string, 
 			if err != nil {
 				fmt.Println(err)
 			}
-			err = tmpl.Execute(outFile, &foo{Package: strings.ReplaceAll(basePackage, string('\n'), ""), AppName: name})
+			err = tmpl.Execute(outFile, &foo{GroupId: groupId, BasePackage: packageNameWithDots, Package: strings.ReplaceAll(packageNameWithDots, string('\n'), ""), AppName: name})
 			if err != nil {
 				fmt.Println(err)
 			}
