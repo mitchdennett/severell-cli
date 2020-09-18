@@ -1,9 +1,10 @@
 package cmd
 
 import (
+	"bytes"
+	"fmt"
 	"github.com/spf13/cobra"
 	"log"
-	"os"
 	"os/exec"
 )
 
@@ -32,11 +33,20 @@ func loadCommands(dir *string, packageName *string) {
 		cmdCon.Dir = *dir
 	}
 
-	cmdCon.Stdout = os.Stdout
-	cmdCon.Stderr = os.Stderr
+	var b bytes.Buffer
+	if Verbose {
+		cmdCon.Stdout = &b
+		cmdCon.Stderr = &b
+	}
+
 
 	err := cmdCon.Run()
 	if err != nil {
-		log.Fatalf("cmd.Run() failed with %s\n", err)
+		fmt.Println("")
+		if Verbose {
+			log.Fatalf("Unable to create project. \n%s", string(b.Bytes()))
+		} else {
+			log.Fatalf("Unable to create project. Run with -v to see underlying error.")
+		}
 	}
 }

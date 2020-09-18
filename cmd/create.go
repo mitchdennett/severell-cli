@@ -1,21 +1,16 @@
 package cmd
 
 import (
-	"archive/zip"
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"github.com/spf13/cobra"
-	"io"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"text/template"
+	"sync"
+	"time"
 )
 
 type command struct {
@@ -24,6 +19,12 @@ type command struct {
 	Command string
 	Flags []flag
 }
+
+var ARCHETYPE_GROUP = "com.severell"
+var ARCHETYPE_ARTIFACT = "severell-archetype"
+var ARCHETYPE_VERSION = "0.0.1-SNAPSHOT"
+
+var Verbose bool
 
 type flag struct {
 	Flag string
@@ -41,175 +42,112 @@ type foo struct {
 
 func init() {
 	rootCmd.AddCommand(createCmd)
-
+	createCmd.Flags().BoolVarP(&Verbose, "verbose", "v", false, "verbose output")
 }
 
 var createCmd = &cobra.Command{
-	Use:   "create [name] [dir]",
-	Short: "Create a new severell project",
-	Long:  `All software has versions. This is Hugo's`,
-	Args: cobra.ExactArgs(1),
+	Use:   "create [name]",
+	Short: "Create a new Severell project",
+	Long:  `Create a new Severell project`,
+	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		reader := bufio.NewReader(os.Stdin)
+		//Getting Base Package
 		fmt.Print("Base Package (Group ID): ")
 		basePackage, _ := reader.ReadString('\n')
 		basePackage = strings.Replace(basePackage, string('\n'), "", 1)
 
-		fmt.Print("Application Name (Artifact ID): ")
-		appName, _ := reader.ReadString('\n')
-		appName = strings.Replace(appName, string('\n'), "", 1)
-
-		createDir(args[0], basePackage)
-		downloadZip(args[0])
-		dest := strings.Replace(args[0], ".", "", 1)
-		fmt.Println("Dest:" + dest)
-		_, err := unzip(args[0] + "/test.zip", dest, basePackage, appName)
-		fmt.Println(err)
-
-		os.Remove(args[0] + "/test.zip")
-
-		os.Rename(args[0] + "/src/main/resources/.env.example", args[0]+ "/src/main/resources/.env")
-
-
-		data := foo {
-			Package: basePackage + "." + appName,
+		var appName string
+		if len(args) > 0 {
+			appName = args[0]
+		} else {
+			//Getting Artifact Id
+			fmt.Print("Application Name (Artifact ID): ")
+			appName, _ = reader.ReadString('\n')
+			appName = strings.Replace(appName, string('\n'), "", 1)
 		}
 
-		file, _ := json.MarshalIndent(data, "", " ")
+		st := "create"
+		var wg sync.WaitGroup
 
-		_ = ioutil.WriteFile(args[0] + "/severell.json", file, 0644)
+		wg.Add(1)
+		go writeToConsole(&st, &wg)
 
-		compile(args[0])
-		loadCommands(&args[0], &data.Package)
+		cmdCon := exec.Command("mvn","-B", "archetype:generate",
+			fmt.Sprintf("-DarchetypeGroupId=%s", ARCHETYPE_GROUP),
+			fmt.Sprintf("-DarchetypeArtifactId=%s", ARCHETYPE_ARTIFACT),
+			fmt.Sprintf("-DarchetypeVersion=%s", ARCHETYPE_VERSION),
+			fmt.Sprintf("-DgroupId=%s", basePackage),
+			fmt.Sprintf("-DartifactId=%s", appName),
+			"-Dversion=1.0-SNAPSHOT")
 
+		var b bytes.Buffer
+		if Verbose {
+			cmdCon.Stdout = &b
+			cmdCon.Stderr = &b
+		}
+
+		err := cmdCon.Run()
+
+		if err != nil {
+			fmt.Println("")
+			if Verbose {
+				log.Fatalf("Unable to create project. \n%s", string(b.Bytes()))
+			} else {
+				log.Fatalf("Unable to create project. Run with -v to see underlying error.")
+			}
+
+		}
+
+
+		p := basePackage + "." + appName
+		loadCommands(&appName, &p)
+
+		st = "stop"
+
+		wg.Wait()
 	},
 }
 
-func compile(dir string) {
-	cmdCon := exec.Command("mvn","-q", "clean", "compile")
-	cmdCon.Dir = dir
 
-	cmdCon.Stdout = os.Stdout
-	cmdCon.Stderr = os.Stderr
 
-	err := cmdCon.Run()
-	if err != nil {
-		log.Fatalf("cmd.Run() failed with %s\n", err)
+
+
+func writeToConsole(st *string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	count := 0
+	fmt.Println("")
+	fmt.Println("Creating new project")
+	time.Sleep(1 * time.Second)
+	for{
+		if *st == "stop" {
+			fmt.Println("")
+			fmt.Println("**********************************")
+			fmt.Println("Successfully Created Project")
+			fmt.Println("**********************************")
+			fmt.Println("")
+			break
+		}
+
+		switch count {
+			case 0:
+				fmt.Println("Setting Group ID")
+			case 1:
+				fmt.Println("Setting Artifact ID")
+			case 2:
+				fmt.Println("Setting Version")
+			case 3:
+				fmt.Println("Setting Up Project")
+			case 4:
+				fmt.Println("Loading Commands")
+			default:
+				if *st == "create" {
+					fmt.Print(".")
+				}
+		}
+
+		count = count + 1
+		time.Sleep(1 * time.Second)
 	}
-}
 
-func createDir(dir string, basePackage string) {
-	if dir != "." {
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			os.Mkdir(dir, os.ModePerm)
-		}
-	}
-}
-
-func downloadZip(dir string) {
-	specUrl := "https://github.com/mitchdennett/severell-framework/archive/master.zip"
-	resp, err := http.Get(specUrl)
-	if err != nil {
-		fmt.Printf("err: %s", err)
-	}
-
-
-	defer resp.Body.Close()
-	fmt.Println("status", resp.Status)
-	if resp.StatusCode != 200 {
-		return
-	}
-
-	// Create the file
-	out, err := os.Create(dir+ "/test.zip")
-	if err != nil {
-		fmt.Printf("err: %s", err)
-	}
-	defer out.Close()
-
-	// Write the body to file
-	_, err = io.Copy(out, resp.Body)
-}
-
-func unzip(src string, dest string, basePackage string, name string) ([]string, error) {
-
-	var filenames []string
-
-	r, err := zip.OpenReader(src)
-	if err != nil {
-		return filenames, err
-	}
-	defer r.Close()
-
-	for _, f := range r.File {
-
-		// Store filename/path for returning and using later on
-
-		groupId := basePackage
-		packageName := strings.ReplaceAll(basePackage, ".", "/") + "/" + name
-		packageNameWithDots := basePackage + "." + name
-
-		fpath := filepath.Join(dest, strings.TrimPrefix(f.Name, "severell-framework-master/"))
-		fmt.Println(fpath)
-		// Check for ZipSlip. More Info: http://bit.ly/2MsjAWE
-		//if fpath != dest && !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
-		//	return filenames, fmt.Errorf("%s: illegal file path", fpath)
-		//}
-		replaceDest := dest
-		if dest != "" {
-			replaceDest = dest + "/"
-		}
-
-		if strings.HasPrefix(fpath, replaceDest + "src/main/java") ||  strings.HasPrefix(fpath, replaceDest + "src/test/java") {
-			fpath = strings.Replace(fpath, replaceDest + "src/main/java", replaceDest + "src/main/java/" + packageName , 1)
-		}
-
-		filenames = append(filenames, fpath)
-
-		if f.FileInfo().IsDir() {
-			// Make Folder
-			os.MkdirAll(fpath, os.ModePerm)
-			continue
-		}
-
-		// Make File
-		if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
-			return filenames, err
-		}
-
-		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-		if err != nil {
-			return filenames, err
-		}
-
-		rc, err := f.Open()
-		if err != nil {
-			return filenames, err
-		}
-
-		if !strings.Contains(filepath.Base(fpath), ".mustache") {
-			buf := new(bytes.Buffer)
-			buf.ReadFrom(rc)
-
-			tmpl, err := template.New("test").Parse(buf.String())
-			if err != nil {
-				fmt.Println(err)
-			}
-			err = tmpl.Execute(outFile, &foo{GroupId: groupId, BasePackage: packageNameWithDots, Package: strings.ReplaceAll(packageNameWithDots, string('\n'), ""), AppName: name})
-			if err != nil {
-				fmt.Println(err)
-			}
-		} else {
-			_, err = io.Copy(outFile, rc)
-		}
-
-		// Close the file without defer to close before next iteration of loop
-		outFile.Close()
-		rc.Close()
-
-		if err != nil {
-			return filenames, err
-		}
-	}
-	return filenames, nil
 }
