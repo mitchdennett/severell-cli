@@ -17,14 +17,13 @@ type command struct {
 	Class string
 	Description string
 	Command string
+	NumArgs int
 	Flags []flag
 }
 
 var ARCHETYPE_GROUP = "com.severell"
 var ARCHETYPE_ARTIFACT = "severell-archetype"
 var ARCHETYPE_VERSION = "0.0.1-SNAPSHOT"
-
-var Verbose bool
 
 type flag struct {
 	Flag string
@@ -42,14 +41,13 @@ type foo struct {
 
 func init() {
 	rootCmd.AddCommand(createCmd)
-	createCmd.Flags().BoolVarP(&Verbose, "verbose", "v", false, "verbose output")
 }
 
 var createCmd = &cobra.Command{
 	Use:   "create [name]",
 	Short: "Create a new Severell project",
 	Long:  `Create a new Severell project`,
-	Args: cobra.MaximumNArgs(1),
+	Args: 	cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		reader := bufio.NewReader(os.Stdin)
 		//Getting Base Package

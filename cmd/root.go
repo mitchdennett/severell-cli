@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -20,12 +21,14 @@ var (
 	userLicense string
 
 	rootCmd = &cobra.Command{
-		Use:   "severell",
+		Use:   "severell-cli",
 		Short: "The Severell Framework CLI Tool",
 		Long: `The Severell CLI tool empowers developers to quickly scaffold applications`,
 	}
 	config	foo
 )
+
+var Verbose bool
 
 // Execute executes the root command.
 func Execute() error {
@@ -34,10 +37,15 @@ func Execute() error {
 
 	for _, comm := range config.Commands {
 		clazz := comm
+		var args cobra.PositionalArgs
+		if comm.NumArgs > -1 {
+			args = cobra.ExactArgs(comm.NumArgs)
+		}
 		var commandImported = &cobra.Command{
 			Use:   comm.Command,
 			Short: comm.Description,
 			Long:  comm.Description,
+			Args: 	args,
 			Run: func(cmd *cobra.Command, args []string) {
 				fmt.Println("Compiling Command...")
 				flagSet := cmd.Flags()
@@ -53,12 +61,20 @@ func Execute() error {
 				argsToPass := fmt.Sprintf("-Dexec.args=%s args=%s flags=%s", clazz.Class,strings.Join(args, ","), strings.Join(argsSlice, ","))
 				cmdCon := exec.Command("mvn","-q", "-T", "1C", "compile", "exec:java", `-Dexec.mainClass=` + config.Package + `.commands.Commander`, argsToPass)
 
-				cmdCon.Stdout = os.Stdout
-				cmdCon.Stderr = os.Stderr
+				var b bytes.Buffer
+				if Verbose {
+					cmdCon.Stdout = &b
+					cmdCon.Stderr = &b
+				}
 
 				err := cmdCon.Run()
 				if err != nil {
-					log.Fatalf("cmd.Run() failed with %s\n", err)
+					fmt.Println("")
+					if Verbose {
+						log.Fatalf("Unable to run command. \n%s", string(b.Bytes()))
+					} else {
+						log.Fatalf("Unable to run command. Run with -v to see underlying error.")
+					}
 				}
 			},
 		}
@@ -73,6 +89,7 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.PersistentFlags().BoolVarP(&Verbose, "verbose", "v", false, "verbose output")
 	cobra.OnInitialize(initConfig)
 }
 
